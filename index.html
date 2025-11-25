@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>ArtMind AI - 备考完全版 (v3.2)</title>
+    <title>ArtMind AI - 备考完全版 (v3.3)</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://unpkg.com/vue@3/dist/vue.global.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/echarts/dist/echarts.min.js"></script>
@@ -17,21 +17,23 @@
         .custom-scroll::-webkit-scrollbar-track { background: transparent; }
         .custom-scroll::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 3px; }
 
-        /* --- 核心修复：强力遮罩样式 --- */
+        /* --- 强力遮罩 (优化版) --- */
         .mask-blur {
             color: transparent;
             background: #cbd5e1;
-            border-radius: 4px;
+            border-radius: 6px;
             cursor: pointer;
-            transition: all 0.3s ease;
-            user-select: none; /* 禁止选中文字 */
-            filter: blur(8px); /* 8px 高斯模糊，彻底看不清 */
-            opacity: 0.5;      /* 降低不透明度，增加混淆感 */
-            transform: scale(0.98); /* 视觉上稍微缩小，点击展开 */
+            transition: all 0.4s cubic-bezier(0.4, 0, 0.2, 1);
+            user-select: none;
+            filter: blur(6px);
+            opacity: 0.6;
+            transform: scale(0.98);
+            line-height: 1.8; /* 增加行高，模糊时更有块状感 */
         }
         .mask-blur:hover {
             background: #94a3b8;
-            opacity: 0.7;
+            opacity: 0.8;
+            filter: blur(4px); /* 悬停时稍微清晰一点点，提示可点 */
         }
         .mask-blur.revealed {
             color: #334155;
@@ -42,7 +44,6 @@
             transform: scale(1);
         }
 
-        /* 填空题小遮罩 */
         .mask-word {
             background-color: #94a3b8; color: transparent; border-radius: 4px;
             padding: 0 6px; cursor: pointer; transition: all 0.2s;
@@ -57,7 +58,7 @@
         @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
 
         .animate-fade-in { animation: fadeIn 0.3s ease-out; }
-        @keyframes fadeIn { from { opacity: 0; transform: translateY(5px); } to { opacity: 1; transform: translateY(0); } }
+        @keyframes fadeIn { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
     </style>
 </head>
 <body class="h-screen flex flex-col overflow-hidden text-sm">
@@ -138,7 +139,7 @@
                     <div class="h-4 w-px bg-slate-200"></div>
                     <button @click="generateTerms" :disabled="isGenerating" class="bg-indigo-600 hover:bg-indigo-700 text-white px-3 py-1.5 rounded-md text-xs font-bold flex items-center gap-2 transition disabled:opacity-50">
                         <span v-if="isGenerating" class="loader border-white/30 border-t-white"></span>
-                        <span v-else>生成名词卡片</span>
+                        <span v-else>生成深度解析</span>
                     </button>
                     <span v-if="sliceInfo" class="text-[10px] text-emerald-600 bg-emerald-50 px-2 py-1 rounded border border-emerald-100 animate-fade-in">
                         <i class="fas fa-check-circle mr-1"></i>{{ sliceInfo }}
@@ -147,21 +148,30 @@
 
                 <div class="flex-1 overflow-y-auto custom-scroll p-6 bg-slate-50">
                     <div v-if="termList.length === 0 && !isGenerating" class="h-full flex flex-col items-center justify-center text-slate-400">
-                        <i class="fas fa-tags text-4xl mb-3 text-slate-300"></i>
-                        <p class="text-xs">选择章节后点击生成，AI将随机截取片段出题</p>
+                        <i class="fas fa-book-open text-4xl mb-3 text-slate-300"></i>
+                        <p class="text-xs">点击生成，AI 将提取原文中的长难句解释与语境</p>
                     </div>
 
-                    <div v-else class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-                        <div v-for="(item, idx) in termList" :key="idx" class="bg-white border border-slate-200 rounded-xl shadow-sm flex flex-col overflow-hidden group animate-fade-in" :style="{animationDelay: idx * 0.05 + 's'}">
-                            <div class="p-4 bg-gradient-to-r from-indigo-50 to-white border-b border-slate-50">
-                                <h3 class="font-bold text-slate-800 text-base text-center">{{ item.term }}</h3>
+                    <div v-else class="grid grid-cols-1 md:grid-cols-2 gap-5">
+                        <div v-for="(item, idx) in termList" :key="idx" class="bg-white border border-slate-200 rounded-xl shadow-sm flex flex-col group animate-fade-in" :style="{animationDelay: idx * 0.05 + 's'}">
+
+                            <div class="p-4 border-b border-slate-50 bg-gradient-to-br from-slate-50 to-white flex justify-between items-start">
+                                <h3 class="font-bold text-slate-800 text-lg">{{ item.term }}</h3>
+                                <span v-if="item.context" class="text-[10px] text-indigo-600 bg-indigo-50 px-2 py-1 rounded-full border border-indigo-100 font-medium max-w-[40%] truncate" :title="item.context">
+                                    <i class="fas fa-tag mr-1"></i>{{ item.context }}
+                                </span>
                             </div>
-                            <div class="p-4 flex-1 bg-slate-50 relative cursor-pointer" @click="item.revealed = !item.revealed">
-                                <div :class="['text-sm leading-relaxed text-slate-600 transition-all duration-300 p-2', item.revealed ? '' : 'mask-blur']">
+
+                            <div class="p-5 flex-1 bg-white relative cursor-pointer min-h-[120px]" @click="item.revealed = !item.revealed">
+
+                                <div :class="['text-sm leading-7 text-slate-700 text-justify transition-all duration-500', item.revealed ? '' : 'mask-blur']">
                                     {{ item.definition }}
                                 </div>
-                                <div v-if="!item.revealed" class="absolute inset-0 flex items-center justify-center pointer-events-none">
-                                    <span class="text-xs text-slate-500 font-bold bg-white/90 px-3 py-1.5 rounded-full shadow-sm border border-slate-100"><i class="fas fa-eye mr-1"></i> 点击背诵</span>
+
+                                <div v-if="!item.revealed" class="absolute inset-0 flex items-center justify-center pointer-events-none z-10">
+                                    <div class="bg-white/90 backdrop-blur-sm px-4 py-2 rounded-full shadow-lg border border-slate-100 text-slate-500 text-xs font-bold flex items-center gap-2 transform transition-transform group-hover:scale-105">
+                                        <i class="fas fa-eye text-indigo-500"></i> 点击背诵原文
+                                    </div>
                                 </div>
                             </div>
                         </div>
@@ -293,7 +303,7 @@
             const fileContent = ref('');
             const searchQuery = ref('');
             const selectedChapter = ref('all');
-            const sliceInfo = ref(''); // 提示切片信息
+            const sliceInfo = ref('');
 
             const tabs = [
                 { id: 'mindmap', name: '全景导图', icon: 'fas fa-project-diagram' },
@@ -352,7 +362,6 @@
                     };
                     const targetNode = findNode([treeData.value], chapterName);
                     if (targetNode) {
-                        // 收集该节点所有子内容
                         const collectText = (node) => {
                             let t = node.name + "\n";
                             if (node.value) t += node.value + "\n";
@@ -363,18 +372,15 @@
                     }
                 }
 
-                // 如果内容少于 3000 字，直接返回全部
-                const LIMIT = 3000;
+                // 扩大了切片大小以包含更多上下文，利于提取长解释
+                const LIMIT = 4000;
                 if (scopeText.length <= LIMIT) {
                     sliceInfo.value = `已读取完整内容 (${scopeText.length}字)`;
                     return scopeText;
                 }
 
-                // 随机切片
                 const maxStart = scopeText.length - LIMIT;
                 let start = Math.floor(Math.random() * maxStart);
-
-                // 寻找最近的换行符，避免切断句子
                 const safeStart = scopeText.indexOf('\n', start);
                 if (safeStart !== -1 && safeStart < start + 500) {
                     start = safeStart;
@@ -493,12 +499,18 @@
                 }
             };
 
-            // --- 功能生成 ---
+            // --- 功能生成：深度优化提示词 ---
             const generateTerms = async () => {
                 isGenerating.value = true;
                 try {
-                    const prompt = "提取该片段中最重要的 6 个专有名词，并给出简练解释。格式：纯JSON数组 [{term: '名词', definition: '解释'}]。不要Markdown。";
-                    let raw = await callAI(prompt, "你是一个专业的笔记整理助手。");
+                    const prompt = `请从文本片段中提取 4-6 个重要的专业名词或概念。
+                要求：
+                1. "definition"（解释）：必须严格基于原文内容，如果原文解释很长，请完整保留其核心逻辑和长句，不要过度概括成一句话，保留细节。
+                2. "context"（语境）：请指出该词出现在什么背景下（例如：儒家美学、西方现代主义、艺术起源理论等）。
+                3. 格式：返回纯 JSON 数组：[{term: "名词", definition: "基于原文的详细解释...", context: "所属语境"}]。
+                4. 不要使用 Markdown 代码块。`;
+
+                    let raw = await callAI(prompt, "你是一个严谨的学术助手，擅长从文献中提取精准定义。");
                     raw = raw.replace(/```json|```/g, '').trim();
                     const list = JSON.parse(raw);
                     termList.value = list.map(i => ({...i, revealed: false}));
