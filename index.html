@@ -265,7 +265,7 @@
             <div class="max-w-5xl mx-auto space-y-8">
                 <div class="text-center mb-8">
                     <h2 class="text-2xl font-bold text-slate-800">AI 智能挖空背诵</h2>
-                    <p class="text-slate-500 mt-2 text-sm">自动读取文档 · 批量生成</p>
+                    <p class="text-slate-500 mt-2 text-sm">切片范围：智能切片 | 批量生成：3题</p>
                     <button @click="generateReciteBatch" :disabled="isAiProcessing" class="mt-4 px-6 py-2 bg-indigo-600 text-white rounded-lg font-bold shadow hover:bg-indigo-700 transition disabled:opacity-50 flex items-center justify-center gap-2 mx-auto">
                         <div v-if="isAiProcessing" class="loader !border-white !border-t-transparent !w-4 !h-4"></div>
                         {{ isAiProcessing ? '正在分析切片并挖空...' : '✨ 随机生成 3 道填空题' }}
@@ -464,14 +464,17 @@
                 return matches.length > 0 ? matches[matches.length - 1][1] : "全书绪论/综合";
             };
 
-            // 切片策略：缩减为1000字
-            const getRandomSliceWithInfo = (text, maxLength = 1000) => {
+            // 优化切片：500字
+            const getRandomSliceWithInfo = (text, maxLength = 500) => {
                 if (text.length <= maxLength) return { text, startIndex: 0 };
+
                 const maxStart = text.length - maxLength;
                 let start = Math.floor(Math.random() * maxStart);
                 while (start > 0 && text[start] !== '\n') start--;
+
                 let end = start + maxLength;
                 while (end < text.length && text[end] !== '\n') end++;
+
                 return { text: text.substring(start, end), startIndex: start };
             };
 
