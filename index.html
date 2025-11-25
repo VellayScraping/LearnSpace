@@ -1,0 +1,581 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>ArtMind AI - 备考完全版 (v3.2)</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://unpkg.com/vue@3/dist/vue.global.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/echarts/dist/echarts.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css" rel="stylesheet">
+
+    <style>
+        body { font-family: 'Inter', system-ui, sans-serif; background: #f8fafc; color: #334155; }
+
+        .custom-scroll::-webkit-scrollbar { width: 6px; }
+        .custom-scroll::-webkit-scrollbar-track { background: transparent; }
+        .custom-scroll::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 3px; }
+
+        /* --- 核心修复：强力遮罩样式 --- */
+        .mask-blur {
+            color: transparent;
+            background: #cbd5e1;
+            border-radius: 4px;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            user-select: none; /* 禁止选中文字 */
+            filter: blur(8px); /* 8px 高斯模糊，彻底看不清 */
+            opacity: 0.5;      /* 降低不透明度，增加混淆感 */
+            transform: scale(0.98); /* 视觉上稍微缩小，点击展开 */
+        }
+        .mask-blur:hover {
+            background: #94a3b8;
+            opacity: 0.7;
+        }
+        .mask-blur.revealed {
+            color: #334155;
+            background: transparent;
+            filter: blur(0);
+            opacity: 1;
+            user-select: text;
+            transform: scale(1);
+        }
+
+        /* 填空题小遮罩 */
+        .mask-word {
+            background-color: #94a3b8; color: transparent; border-radius: 4px;
+            padding: 0 6px; cursor: pointer; transition: all 0.2s;
+            user-select: none; display: inline-block; margin: 0 2px; font-weight: bold;
+        }
+        .mask-word.revealed { background-color: rgba(16, 185, 129, 0.15); color: #059669; }
+
+        .loader {
+            border: 2px solid #e2e8f0; border-top: 2px solid #3b82f6; border-radius: 50%;
+            width: 16px; height: 16px; animation: spin 1s linear infinite;
+        }
+        @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
+
+        .animate-fade-in { animation: fadeIn 0.3s ease-out; }
+        @keyframes fadeIn { from { opacity: 0; transform: translateY(5px); } to { opacity: 1; transform: translateY(0); } }
+    </style>
+</head>
+<body class="h-screen flex flex-col overflow-hidden text-sm">
+
+<div id="app" class="h-full flex flex-col">
+
+    <header class="bg-white border-b border-slate-200 h-14 shrink-0 flex items-center justify-between px-4 z-20 shadow-sm">
+        <div class="flex items-center gap-3">
+            <div class="w-8 h-8 bg-indigo-600 rounded-lg flex items-center justify-center text-white font-bold text-lg shadow-indigo-200 shadow-md">
+                <i class="fas fa-graduation-cap"></i>
+            </div>
+            <h1 class="font-bold text-slate-800 tracking-tight text-lg">ArtMind <span class="text-indigo-600">Pro</span></h1>
+        </div>
+
+        <div class="flex items-center gap-3">
+            <label class="cursor-pointer bg-slate-100 hover:bg-indigo-50 hover:text-indigo-600 text-slate-600 px-3 py-1.5 rounded-md text-xs font-bold transition flex items-center gap-2 border border-slate-200 hover:border-indigo-200">
+                <i class="fas fa-file-upload"></i> 导入笔记 (.md)
+                <input type="file" class="hidden" accept=".md,.txt" @change="handleFileUpload">
+            </label>
+            <button @click="showSettings = true" class="w-8 h-8 rounded-full hover:bg-slate-100 text-slate-400 hover:text-indigo-600 transition flex items-center justify-center">
+                <i class="fas fa-cog text-lg"></i>
+            </button>
+        </div>
+    </header>
+
+    <div class="flex flex-1 overflow-hidden">
+        <nav class="w-56 bg-slate-50 border-r border-slate-200 flex flex-col shrink-0">
+            <div class="p-3 space-y-1">
+                <button v-for="tab in tabs" :key="tab.id" @click="currentTab = tab.id"
+                        :class="['w-full text-left px-3 py-2.5 rounded-lg text-xs font-bold transition-all flex items-center gap-3',
+                             currentTab === tab.id ? 'bg-white text-indigo-600 shadow-sm border border-slate-100' : 'text-slate-500 hover:bg-slate-200/50']">
+                    <i :class="[tab.icon, 'text-sm w-5 text-center']"></i> {{ tab.name }}
+                </button>
+            </div>
+
+            <div class="mt-auto p-4 border-t border-slate-200 bg-slate-100/50">
+                <div class="text-[10px] text-slate-400 font-bold uppercase tracking-wider mb-1">Current File</div>
+                <div class="text-xs font-bold text-slate-700 truncate" :title="fileName">{{ fileName || '未导入文件' }}</div>
+                <div class="text-[10px] text-slate-400 mt-0.5" v-if="fileContent">字数: {{ fileContent.length }}</div>
+            </div>
+        </nav>
+
+        <main class="flex-1 relative bg-white overflow-hidden">
+
+            <div v-if="!fileContent" class="absolute inset-0 flex flex-col items-center justify-center text-slate-300">
+                <div class="w-20 h-20 bg-slate-50 rounded-full flex items-center justify-center mb-4">
+                    <i class="fas fa-file-markdown text-4xl text-slate-200"></i>
+                </div>
+                <p class="text-base font-medium text-slate-500">请先导入 Markdown 笔记文件</p>
+            </div>
+
+            <div v-show="currentTab === 'mindmap' && fileContent" class="h-full flex flex-col relative">
+                <div class="absolute top-4 left-4 z-10 w-64">
+                    <input v-model="searchQuery" placeholder="搜索节点..." class="w-full bg-white/90 backdrop-blur border border-slate-200 rounded-full pl-4 pr-4 py-2 text-xs focus:ring-2 focus:ring-indigo-500 shadow-sm">
+                    <div v-if="searchQuery" class="mt-2 bg-white shadow-xl border border-slate-200 rounded-lg max-h-60 overflow-y-auto custom-scroll">
+                        <div v-for="(match, idx) in searchResults" :key="idx" class="p-2.5 hover:bg-indigo-50 cursor-pointer border-b border-slate-50" @click="alertNode(match.title)">
+                            <div class="font-bold text-indigo-700 text-xs">{{ match.title }}</div>
+                        </div>
+                    </div>
+                </div>
+                <div id="mindmap-container" class="w-full h-full bg-slate-50"></div>
+                <div class="absolute bottom-6 right-6 flex flex-col gap-2 z-10">
+                    <button @click="handleZoom(0.2)" class="w-9 h-9 bg-white rounded shadow border text-slate-600 hover:text-indigo-600 flex items-center justify-center"><i class="fas fa-plus"></i></button>
+                    <button @click="handleZoom(-0.2)" class="w-9 h-9 bg-white rounded shadow border text-slate-600 hover:text-indigo-600 flex items-center justify-center"><i class="fas fa-minus"></i></button>
+                    <button @click="resetZoom" class="w-9 h-9 bg-white rounded shadow border text-slate-600 hover:text-indigo-600 flex items-center justify-center"><i class="fas fa-compress"></i></button>
+                </div>
+            </div>
+
+            <div v-show="currentTab === 'terms' && fileContent" class="h-full flex flex-col">
+                <div class="px-6 py-3 border-b border-slate-100 bg-white flex gap-4 items-center shrink-0">
+                    <div class="flex items-center gap-2">
+                        <i class="fas fa-filter text-slate-400"></i>
+                        <select v-model="selectedChapter" class="bg-slate-50 border border-slate-200 text-xs rounded-md px-2 py-1.5 outline-none focus:border-indigo-500 max-w-[200px]">
+                            <option value="all">全书 (随机抽取片段)</option>
+                            <option v-for="chap in chapterList" :value="chap">{{ chap }}</option>
+                        </select>
+                    </div>
+                    <div class="h-4 w-px bg-slate-200"></div>
+                    <button @click="generateTerms" :disabled="isGenerating" class="bg-indigo-600 hover:bg-indigo-700 text-white px-3 py-1.5 rounded-md text-xs font-bold flex items-center gap-2 transition disabled:opacity-50">
+                        <span v-if="isGenerating" class="loader border-white/30 border-t-white"></span>
+                        <span v-else>生成名词卡片</span>
+                    </button>
+                    <span v-if="sliceInfo" class="text-[10px] text-emerald-600 bg-emerald-50 px-2 py-1 rounded border border-emerald-100 animate-fade-in">
+                        <i class="fas fa-check-circle mr-1"></i>{{ sliceInfo }}
+                    </span>
+                </div>
+
+                <div class="flex-1 overflow-y-auto custom-scroll p-6 bg-slate-50">
+                    <div v-if="termList.length === 0 && !isGenerating" class="h-full flex flex-col items-center justify-center text-slate-400">
+                        <i class="fas fa-tags text-4xl mb-3 text-slate-300"></i>
+                        <p class="text-xs">选择章节后点击生成，AI将随机截取片段出题</p>
+                    </div>
+
+                    <div v-else class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                        <div v-for="(item, idx) in termList" :key="idx" class="bg-white border border-slate-200 rounded-xl shadow-sm flex flex-col overflow-hidden group animate-fade-in" :style="{animationDelay: idx * 0.05 + 's'}">
+                            <div class="p-4 bg-gradient-to-r from-indigo-50 to-white border-b border-slate-50">
+                                <h3 class="font-bold text-slate-800 text-base text-center">{{ item.term }}</h3>
+                            </div>
+                            <div class="p-4 flex-1 bg-slate-50 relative cursor-pointer" @click="item.revealed = !item.revealed">
+                                <div :class="['text-sm leading-relaxed text-slate-600 transition-all duration-300 p-2', item.revealed ? '' : 'mask-blur']">
+                                    {{ item.definition }}
+                                </div>
+                                <div v-if="!item.revealed" class="absolute inset-0 flex items-center justify-center pointer-events-none">
+                                    <span class="text-xs text-slate-500 font-bold bg-white/90 px-3 py-1.5 rounded-full shadow-sm border border-slate-100"><i class="fas fa-eye mr-1"></i> 点击背诵</span>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <div v-show="currentTab === 'recite' && fileContent" class="h-full flex flex-col">
+                <div class="px-6 py-3 border-b border-slate-100 bg-white flex gap-4 items-center shrink-0">
+                    <div class="flex items-center gap-2">
+                        <i class="fas fa-filter text-slate-400"></i>
+                        <select v-model="selectedChapter" class="bg-slate-50 border border-slate-200 text-xs rounded-md px-2 py-1.5 outline-none focus:border-indigo-500 max-w-[200px]">
+                            <option value="all">全书 (随机抽取片段)</option>
+                            <option v-for="chap in chapterList" :value="chap">{{ chap }}</option>
+                        </select>
+                    </div>
+                    <div class="h-4 w-px bg-slate-200"></div>
+                    <button @click="generateRecite" :disabled="isGenerating" class="bg-emerald-600 hover:bg-emerald-700 text-white px-3 py-1.5 rounded-md text-xs font-bold flex items-center gap-2 transition disabled:opacity-50">
+                        <span v-if="isGenerating" class="loader border-white/30 border-t-white"></span>
+                        <span v-else>随机切片出题</span>
+                    </button>
+                    <span v-if="sliceInfo" class="text-[10px] text-emerald-600 bg-emerald-50 px-2 py-1 rounded border border-emerald-100 animate-fade-in">
+                        <i class="fas fa-check-circle mr-1"></i>{{ sliceInfo }}
+                    </span>
+                </div>
+
+                <div class="flex-1 overflow-y-auto custom-scroll p-6 bg-slate-50">
+                    <div v-if="reciteList.length === 0 && !isGenerating" class="h-full flex flex-col items-center justify-center text-slate-400">
+                        <i class="fas fa-edit text-4xl mb-3 text-slate-300"></i>
+                        <p class="text-xs">AI 随机读取笔记片段生成填空</p>
+                    </div>
+                    <div v-else class="max-w-3xl mx-auto space-y-4">
+                        <div v-for="(item, idx) in reciteList" :key="idx" class="bg-white border border-slate-200 p-5 rounded-xl shadow-sm animate-fade-in">
+                            <div class="flex gap-3 mb-3">
+                                <span class="bg-emerald-50 text-emerald-600 text-xs font-bold px-2 py-0.5 rounded h-fit border border-emerald-100">Q{{ idx + 1 }}</span>
+                                <h3 class="font-bold text-base text-slate-800">{{ item.question }}</h3>
+                            </div>
+                            <div class="pl-9 text-slate-600 leading-7 text-justify text-sm">
+                                <template v-for="(seg, sIdx) in item.segments" :key="sIdx">
+                                    <span v-if="seg.type === 'text'">{{ seg.text }}</span>
+                                    <span v-else class="mask-word" :class="{ 'revealed': seg.revealed }" @click="seg.revealed = !seg.revealed">{{ seg.text }}</span>
+                                </template>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <div v-show="currentTab === 'quiz' && fileContent" class="h-full flex flex-col">
+                <div class="px-6 py-3 border-b border-slate-100 bg-white flex gap-4 items-center shrink-0">
+                    <div class="flex items-center gap-2">
+                        <i class="fas fa-filter text-slate-400"></i>
+                        <select v-model="selectedChapter" class="bg-slate-50 border border-slate-200 text-xs rounded-md px-2 py-1.5 outline-none focus:border-indigo-500 max-w-[200px]">
+                            <option value="all">全书 (随机抽取片段)</option>
+                            <option v-for="chap in chapterList" :value="chap">{{ chap }}</option>
+                        </select>
+                    </div>
+                    <div class="h-4 w-px bg-slate-200"></div>
+                    <button @click="generateQuiz" :disabled="isGenerating" class="bg-blue-600 hover:bg-blue-700 text-white px-3 py-1.5 rounded-md text-xs font-bold flex items-center gap-2 transition disabled:opacity-50">
+                        <span v-if="isGenerating" class="loader border-white/30 border-t-white"></span>
+                        <span v-else>随机切片出题</span>
+                    </button>
+                    <span v-if="sliceInfo" class="text-[10px] text-emerald-600 bg-emerald-50 px-2 py-1 rounded border border-emerald-100 animate-fade-in">
+                        <i class="fas fa-check-circle mr-1"></i>{{ sliceInfo }}
+                    </span>
+                </div>
+
+                <div class="flex-1 overflow-y-auto custom-scroll p-6 bg-slate-50">
+                    <div v-if="quizList.length === 0 && !isGenerating" class="h-full flex flex-col items-center justify-center text-slate-400">
+                        <i class="fas fa-list-ol text-4xl mb-3 text-slate-300"></i>
+                        <p class="text-xs">AI 随机切片模拟真题</p>
+                    </div>
+                    <div v-else class="max-w-2xl mx-auto space-y-6">
+                        <div v-for="(q, qIdx) in quizList" :key="qIdx" class="bg-white p-6 rounded-xl border border-slate-200 shadow-sm animate-fade-in">
+                            <h3 class="font-bold text-base text-slate-800 mb-4 flex gap-2">
+                                <span class="text-slate-300 font-mono">{{ qIdx + 1 }}.</span> {{ q.question }}
+                            </h3>
+                            <div class="grid gap-2.5">
+                                <button v-for="(opt, key) in q.options" :key="key"
+                                        @click="q.userAnswer = key"
+                                        :disabled="q.userAnswer !== null"
+                                        :class="['w-full text-left px-4 py-3 rounded-lg border transition-all relative flex justify-between items-center text-sm',
+                                             getOptionStyle(q, key)]">
+                                    <span><b class="mr-2 text-slate-400 font-mono">{{ key }}.</b> {{ opt }}</span>
+                                    <i v-if="q.userAnswer === key && key !== q.correct" class="fas fa-times text-red-500"></i>
+                                    <i v-if="q.userAnswer !== null && key === q.correct" class="fas fa-check text-green-500"></i>
+                                </button>
+                            </div>
+                            <div v-if="q.userAnswer !== null" class="mt-4 bg-blue-50/50 border border-blue-100 p-3 rounded-lg text-xs text-blue-800">
+                                <span class="font-bold block mb-1">💡 解析：</span>{{ q.explanation }}
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+        </main>
+    </div>
+
+    <div v-if="showSettings" class="fixed inset-0 bg-slate-900/40 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+        <div class="bg-white rounded-xl shadow-2xl w-full max-w-sm p-5">
+            <h3 class="text-base font-bold text-slate-800 mb-4 flex items-center gap-2"><i class="fas fa-robot text-indigo-600"></i> AI 配置</h3>
+            <div class="space-y-3">
+                <div><label class="block text-[10px] font-bold text-slate-500 mb-1">BASE URL (请勿带/chat/completions)</label><input v-model="apiConfig.baseUrl" class="w-full bg-slate-50 border border-slate-200 rounded px-3 py-2 text-xs outline-none focus:border-indigo-500"></div>
+                <div><label class="block text-[10px] font-bold text-slate-500 mb-1">API KEY</label><input v-model="apiConfig.key" type="password" class="w-full bg-slate-50 border border-slate-200 rounded px-3 py-2 text-xs outline-none focus:border-indigo-500"></div>
+                <div><label class="block text-[10px] font-bold text-slate-500 mb-1">MODEL</label><input v-model="apiConfig.model" class="w-full bg-slate-50 border border-slate-200 rounded px-3 py-2 text-xs outline-none focus:border-indigo-500"></div>
+            </div>
+            <div class="mt-5 p-3 bg-slate-50 rounded border border-slate-100 flex justify-between items-center">
+                <span :class="['font-bold text-xs', testStatus.color]">{{ testStatus.text }}</span>
+                <button @click="testConnection" :disabled="testing" class="bg-white border border-slate-200 text-slate-600 px-3 py-1 rounded text-xs hover:bg-slate-50">{{ testing ? '...' : '测试' }}</button>
+            </div>
+            <div class="flex gap-2 mt-5 pt-4 border-t border-slate-100">
+                <button @click="showSettings = false" class="flex-1 px-4 py-2 text-slate-500 hover:bg-slate-50 rounded-lg text-xs font-bold">取消</button>
+                <button @click="saveSettings" class="flex-1 px-4 py-2 bg-indigo-600 text-white rounded-lg text-xs font-bold hover:bg-indigo-700">保存</button>
+            </div>
+        </div>
+    </div>
+
+</div>
+
+<script>
+    const { createApp, ref, computed, watch, onMounted, nextTick } = Vue;
+
+    createApp({
+        setup() {
+            const currentTab = ref('mindmap');
+            const showSettings = ref(false);
+            const fileName = ref('');
+            const fileContent = ref('');
+            const searchQuery = ref('');
+            const selectedChapter = ref('all');
+            const sliceInfo = ref(''); // 提示切片信息
+
+            const tabs = [
+                { id: 'mindmap', name: '全景导图', icon: 'fas fa-project-diagram' },
+                { id: 'terms', name: '名词解释', icon: 'fas fa-tags' },
+                { id: 'recite', name: '填空检测', icon: 'fas fa-edit' },
+                { id: 'quiz', name: '模拟真题', icon: 'fas fa-check-circle' }
+            ];
+
+            // API Config
+            const apiConfig = ref({
+                baseUrl: localStorage.getItem('artmind_baseurl') || 'https://api.deepseek.com',
+                key: localStorage.getItem('artmind_key') || '',
+                model: localStorage.getItem('artmind_model') || 'deepseek-chat'
+            });
+
+            const testing = ref(false);
+            const testStatus = ref({ text: '未测试', color: 'text-slate-400' });
+            const treeData = ref(null);
+            const termList = ref([]);
+            const reciteList = ref([]);
+            const quizList = ref([]);
+            const isGenerating = ref(false);
+            const zoomLevel = ref(1);
+
+            // --- 核心工具 ---
+            const cleanBaseUrl = (url) => {
+                let clean = url.trim().replace(/\/+$/, '');
+                if (clean.endsWith('/chat/completions')) clean = clean.replace('/chat/completions', '');
+                return clean;
+            };
+
+            const chapterList = computed(() => {
+                if (!treeData.value || !treeData.value.children) return [];
+                return treeData.value.children.map(c => c.name);
+            });
+
+            // --- 核心算法：随机切片获取器 ---
+            const getRandomSlice = (chapterName) => {
+                if (!treeData.value) return "";
+
+                let scopeText = "";
+
+                if (chapterName === 'all') {
+                    scopeText = fileContent.value;
+                } else {
+                    // 查找特定章节节点
+                    const findNode = (nodes, name) => {
+                        for (let node of nodes) {
+                            if (node.name === name) return node;
+                            if (node.children) {
+                                const found = findNode(node.children, name);
+                                if (found) return found;
+                            }
+                        }
+                        return null;
+                    };
+                    const targetNode = findNode([treeData.value], chapterName);
+                    if (targetNode) {
+                        // 收集该节点所有子内容
+                        const collectText = (node) => {
+                            let t = node.name + "\n";
+                            if (node.value) t += node.value + "\n";
+                            if (node.children) node.children.forEach(c => t += collectText(c));
+                            return t;
+                        };
+                        scopeText = collectText(targetNode);
+                    }
+                }
+
+                // 如果内容少于 3000 字，直接返回全部
+                const LIMIT = 3000;
+                if (scopeText.length <= LIMIT) {
+                    sliceInfo.value = `已读取完整内容 (${scopeText.length}字)`;
+                    return scopeText;
+                }
+
+                // 随机切片
+                const maxStart = scopeText.length - LIMIT;
+                let start = Math.floor(Math.random() * maxStart);
+
+                // 寻找最近的换行符，避免切断句子
+                const safeStart = scopeText.indexOf('\n', start);
+                if (safeStart !== -1 && safeStart < start + 500) {
+                    start = safeStart;
+                }
+
+                const slice = scopeText.substring(start, start + LIMIT);
+                const progress = Math.floor((start / scopeText.length) * 100);
+                sliceInfo.value = `已随机截取片段 (位置: ${progress}%)`;
+
+                return "..." + slice + "...";
+            };
+
+            // --- 文件处理 ---
+            const handleFileUpload = (event) => {
+                const file = event.target.files[0];
+                if (!file) return;
+                fileName.value = file.name;
+                const reader = new FileReader();
+                reader.onload = (e) => {
+                    fileContent.value = e.target.result;
+                    parseMarkdown(fileContent.value);
+                };
+                reader.readAsText(file);
+            };
+
+            const parseMarkdown = (md) => {
+                const lines = md.split('\n');
+                const root = { name: fileName.value.replace('.md',''), children: [] };
+                const stack = [{ node: root, level: 0 }];
+
+                lines.forEach(line => {
+                    const headerMatch = line.match(/^(#+)\s+(.*)/);
+                    const listMatch = line.match(/^(\s*)-\s+(.*)/);
+                    if (headerMatch) {
+                        const level = headerMatch[1].length;
+                        const name = headerMatch[2].trim();
+                        const newNode = { name, children: [] };
+                        while (stack.length > 0 && stack[stack.length - 1].level >= level) stack.pop();
+                        stack[stack.length - 1].node.children.push(newNode);
+                        stack.push({ node: newNode, level });
+                    } else if (listMatch) {
+                        const content = listMatch[2].trim();
+                        const parent = stack[stack.length - 1].node;
+                        if (content.length > 50 || content.includes('：')) {
+                            parent.value = (parent.value ? parent.value + '\n' : '') + content;
+                        } else {
+                            parent.children.push({ name: content, value: '' });
+                        }
+                    }
+                });
+                treeData.value = root;
+                initChart();
+            };
+
+            // --- 图表 ---
+            let myChart = null;
+            const initChart = () => {
+                const dom = document.getElementById('mindmap-container');
+                if (!dom || !treeData.value) return;
+                if (myChart) myChart.dispose();
+                myChart = echarts.init(dom);
+                myChart.setOption({
+                    tooltip: { trigger: 'item', formatter: '{b}' },
+                    series: [{
+                        type: 'tree', data: [treeData.value],
+                        top: '5%', bottom: '5%', left: '10%', right: '20%',
+                        symbolSize: 7, initialTreeDepth: 2, roam: true,
+                        label: { position: 'left', verticalAlign: 'middle', align: 'right', fontSize: 14 },
+                        leaves: { label: { position: 'right', verticalAlign: 'middle', align: 'left' } },
+                        expandAndCollapse: true, zoom: zoomLevel.value
+                    }]
+                });
+                window.onresize = () => myChart.resize();
+            };
+
+            const handleZoom = (delta) => {
+                if (!myChart) return;
+                let newZoom = zoomLevel.value + delta;
+                if (newZoom < 0.2) newZoom = 0.2; if (newZoom > 5) newZoom = 5;
+                zoomLevel.value = newZoom;
+                myChart.setOption({ series: [{ zoom: zoomLevel.value }] });
+            };
+            const resetZoom = () => {
+                if (!myChart) return;
+                zoomLevel.value = 1;
+                myChart.setOption({ series: [{ zoom: 1, center: null }] });
+            };
+            watch(currentTab, (v) => { if(v === 'mindmap') nextTick(initChart); });
+
+            // --- AI 交互 ---
+            const callAI = async (prompt, systemMsg) => {
+                if (!apiConfig.value.key) { showSettings.value = true; throw new Error("请配置 API Key"); }
+
+                const contentContext = getRandomSlice(selectedChapter.value);
+                const finalBaseUrl = cleanBaseUrl(apiConfig.value.baseUrl);
+
+                try {
+                    const res = await fetch(`${finalBaseUrl}/chat/completions`, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${apiConfig.value.key}` },
+                        body: JSON.stringify({
+                            model: apiConfig.value.model,
+                            messages: [
+                                { role: "system", content: systemMsg },
+                                { role: "user", content: `基于以下笔记片段(随机截取)：\n${contentContext}\n\n任务：${prompt}` }
+                            ],
+                            temperature: 0.7, stream: false
+                        })
+                    });
+                    if (!res.ok) throw new Error(`API Error: ${res.status}`);
+                    const data = await res.json();
+                    return data.choices[0].message.content;
+                } catch (error) {
+                    if (error.message.includes('Failed to fetch')) throw new Error("网络/跨域错误，请检查 Base URL 或使用代理");
+                    throw error;
+                }
+            };
+
+            // --- 功能生成 ---
+            const generateTerms = async () => {
+                isGenerating.value = true;
+                try {
+                    const prompt = "提取该片段中最重要的 6 个专有名词，并给出简练解释。格式：纯JSON数组 [{term: '名词', definition: '解释'}]。不要Markdown。";
+                    let raw = await callAI(prompt, "你是一个专业的笔记整理助手。");
+                    raw = raw.replace(/```json|```/g, '').trim();
+                    const list = JSON.parse(raw);
+                    termList.value = list.map(i => ({...i, revealed: false}));
+                } catch (e) { alert(e.message); } finally { isGenerating.value = false; }
+            };
+
+            const generateRecite = async () => {
+                isGenerating.value = true;
+                try {
+                    const prompt = "根据该片段生成 5 道填空题。格式：纯JSON数组 [{question: '题干', segments: [{type:'text', text:'...'}, {type:'mask', text:'答案'}]}]。不要Markdown。";
+                    let raw = await callAI(prompt, "你是一个严谨的出题人。");
+                    raw = raw.replace(/```json|```/g, '').trim();
+                    reciteList.value = JSON.parse(raw);
+                } catch (e) { alert(e.message); } finally { isGenerating.value = false; }
+            };
+
+            const generateQuiz = async () => {
+                isGenerating.value = true;
+                try {
+                    const prompt = "根据该片段生成 5 道单选题。格式：纯JSON数组 [{question: '...', options: {A:'..', B:'..'}, correct: 'A', explanation: '..'}]。不要Markdown。";
+                    let raw = await callAI(prompt, "你是一个严谨的出题人。");
+                    raw = raw.replace(/```json|```/g, '').trim();
+                    quizList.value = JSON.parse(raw).map(q => ({...q, userAnswer: null}));
+                } catch (e) { alert(e.message); } finally { isGenerating.value = false; }
+            };
+
+            // --- 测试与设置 ---
+            const testConnection = async () => {
+                testing.value = true; testStatus.value = { text: '连接中...', color: 'text-blue-500' };
+                try {
+                    const finalBaseUrl = cleanBaseUrl(apiConfig.value.baseUrl);
+                    const res = await fetch(`${finalBaseUrl}/chat/completions`, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${apiConfig.value.key}` },
+                        body: JSON.stringify({ model: apiConfig.value.model, messages: [{ role: "user", content: "Hi" }], max_tokens: 5 })
+                    });
+                    if (res.ok) testStatus.value = { text: '连接成功', color: 'text-green-500' };
+                    else throw new Error(res.status);
+                } catch (e) { testStatus.value = { text: '失败', color: 'text-red-500' }; } finally { testing.value = false; }
+            };
+
+            const saveSettings = () => {
+                localStorage.setItem('artmind_baseurl', apiConfig.value.baseUrl);
+                localStorage.setItem('artmind_key', apiConfig.value.key);
+                localStorage.setItem('artmind_model', apiConfig.value.model);
+                showSettings.value = false;
+            };
+
+            const getOptionStyle = (q, key) => {
+                if (q.userAnswer === null) return 'bg-white border-slate-200 hover:bg-slate-50 text-slate-600';
+                if (key === q.correct) return 'bg-green-50 border-green-500 text-green-700 font-bold';
+                if (q.userAnswer === key && key !== q.correct) return 'bg-red-50 border-red-500 text-red-700';
+                return 'opacity-50 border-slate-100';
+            };
+
+            // 搜索与节点
+            const searchResults = computed(() => {
+                if (!searchQuery.value || !treeData.value) return [];
+                const res = [];
+                const traverse = (n) => {
+                    if (n.name.toLowerCase().includes(searchQuery.value.toLowerCase())) res.push({title: n.name});
+                    if (n.children) n.children.forEach(traverse);
+                };
+                traverse(treeData.value);
+                return res;
+            });
+            const alertNode = (t) => alert(`已定位：${t}`);
+
+            return {
+                currentTab, tabs, showSettings, apiConfig, fileName, fileContent, handleFileUpload,
+                chapterList, selectedChapter, termList, reciteList, quizList, isGenerating, sliceInfo,
+                generateTerms, generateRecite, generateQuiz,
+                testing, testStatus, testConnection, saveSettings, getOptionStyle,
+                handleZoom, resetZoom, searchQuery, searchResults, alertNode
+            };
+        }
+    }).mount('#app');
+</script>
+</body>
+</html>
